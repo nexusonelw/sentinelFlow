@@ -3,6 +3,7 @@ use crate::models::{
 };
 use std::{
     collections::BTreeMap,
+    env,
     fs::{self, File, OpenOptions},
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
@@ -566,7 +567,7 @@ fn platform_name() -> &'static str {
 }
 
 fn command_available(program: &str) -> bool {
-    Command::new(program)
+    command_with_augmented_path(program)
         .arg("--version")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -576,7 +577,7 @@ fn command_available(program: &str) -> bool {
 }
 
 fn run_command(program: &str, args: &[String]) -> Result<String, String> {
-    let output = Command::new(program)
+    let output = command_with_augmented_path(program)
         .args(args)
         .output()
         .map_err(|error| format!("无法执行安装命令 {program}：{error}"))?;
@@ -606,13 +607,26 @@ fn truncate_output(mut output: String) -> String {
 }
 
 fn probe_engine() -> (Option<String>, Option<String>) {
-    let Ok(output) = Command::new("mitmdump").arg("--version").output() else {
+    for candidate in engine_candidates() {
+        if let Some(result) = probe_engine_path(&candidate) {
+            return (Some(result.0), Some(result.1));
+        }
+    }
+
+    // Keep a final PATH-based fallback for package managers that expose a
+    // shim in a non-standard directory. The command inherits the augmented
+    // PATH, which is important when the app was launched from Finder or a
+    // desktop launcher rather than from a shell.
+    let output = command_with_augmented_path("mitmdump")
+        .arg("--version")
+        .output();
+    let Ok(output) = output else {
         return (None, None);
     };
     if !output.status.success() {
         return (None, None);
     }
-    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let version = command_output_text(&output);
     (
         Some("mitmdump".to_string()),
         (!version.is_empty()).then_some(version),
@@ -637,22 +651,212 @@ pub fn is_excluded_process(process_name: &str, configured: &[String]) -> bool {
 
 fn resolve_engine(configured: &str) -> Result<String, String> {
     if !configured.trim().is_empty() {
-        if !Path::new(configured).is_file() {
+        let path = Path::new(configured.trim());
+        if !path.is_file() {
             return Err(format!("TLS 引擎路径不存在：{configured}"));
         }
-        return Ok(configured.to_string());
+        if probe_engine_path(path).is_none() {
+            return Err(format!(
+                "TLS 引擎存在但无法运行：{configured}。请检查路径或重新安装 mitmproxy"
+            ));
+        }
+        return Ok(configured.trim().to_string());
     }
-    let output = Command::new("mitmdump")
+    probe_engine().0.ok_or_else(|| {
+        format!(
+            "未找到可运行的 mitmdump。应用已检查当前 PATH 和常见安装目录（如 /opt/homebrew/bin、~/.local/bin、Python Scripts 目录）。请在设置中填写 mitmdump 的绝对路径"
+        )
+    })
+}
+
+fn command_with_augmented_path(program: &str) -> Command {
+    let mut command = Command::new(program);
+    if let Some(path) = augmented_path() {
+        command.env("PATH", path);
+    }
+    command
+}
+
+fn augmented_path() -> Option<std::ffi::OsString> {
+    let mut paths = command_search_directories();
+    if let Some(current) = env::var_os("PATH") {
+        paths.extend(env::split_paths(&current));
+    }
+    deduplicate_paths(&mut paths);
+    env::join_paths(paths).ok()
+}
+
+fn command_search_directories() -> Vec<PathBuf> {
+    let mut directories = Vec::new();
+
+    #[cfg(target_os = "macos")]
+    {
+        directories.extend([
+            PathBuf::from("/opt/homebrew/bin"),
+            PathBuf::from("/opt/homebrew/sbin"),
+            PathBuf::from("/usr/local/bin"),
+            PathBuf::from("/usr/local/sbin"),
+            PathBuf::from("/Applications/mitmproxy.app/Contents/MacOS"),
+        ]);
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        directories.extend([
+            PathBuf::from("/usr/local/bin"),
+            PathBuf::from("/usr/bin"),
+            PathBuf::from("/snap/bin"),
+        ]);
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        directories.extend([
+            PathBuf::from(r"C:\Program Files\mitmproxy\bin"),
+            PathBuf::from(r"C:\Program Files (x86)\mitmproxy\bin"),
+        ]);
+        if let Some(local_app_data) = env::var_os("LOCALAPPDATA") {
+            let root = PathBuf::from(local_app_data);
+            directories.push(root.join("Programs").join("mitmproxy"));
+            add_versioned_child_directories(
+                &mut directories,
+                &root.join("Programs").join("Python"),
+                "Scripts",
+            );
+        }
+        if let Some(app_data) = env::var_os("APPDATA") {
+            add_versioned_child_directories(
+                &mut directories,
+                &PathBuf::from(app_data).join("Python"),
+                "Scripts",
+            );
+        }
+    }
+
+    if let Some(home) = home_directory() {
+        directories.push(home.join(".local").join("bin"));
+        directories.push(
+            home.join(".local")
+                .join("share")
+                .join("uv")
+                .join("tools")
+                .join("mitmproxy")
+                .join("bin"),
+        );
+        add_versioned_child_directories(
+            &mut directories,
+            &home.join("Library").join("Python"),
+            "bin",
+        );
+        add_versioned_child_directories(
+            &mut directories,
+            &home.join(".local").join("share").join("pipx").join("venvs"),
+            "bin",
+        );
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    {
+        add_cask_engine_directories(&mut directories);
+    }
+
+    deduplicate_paths(&mut directories);
+    directories
+}
+
+fn engine_candidates() -> Vec<PathBuf> {
+    let mut candidates = command_search_directories()
+        .into_iter()
+        .map(|directory| {
+            directory.join(if cfg!(target_os = "windows") {
+                "mitmdump.exe"
+            } else {
+                "mitmdump"
+            })
+        })
+        .collect::<Vec<_>>();
+    deduplicate_paths(&mut candidates);
+    candidates
+}
+
+fn probe_engine_path(path: &Path) -> Option<(String, String)> {
+    if !path.is_file() {
+        return None;
+    }
+    let output = command_with_augmented_path(&path.to_string_lossy())
         .arg("--version")
         .output()
-        .map_err(|_| {
-            "未找到 mitmdump。请安装 mitmproxy，或在设置中填写 mitmdump 的绝对路径".to_string()
-        })?;
-    if output.status.success() {
-        Ok("mitmdump".to_string())
-    } else {
-        Err("mitmdump 无法运行。请检查安装，或在设置中填写 TLS 引擎路径".to_string())
+        .ok()?;
+    if !output.status.success() {
+        return None;
     }
+    Some((
+        path.to_string_lossy().into_owned(),
+        command_output_text(&output),
+    ))
+}
+
+fn command_output_text(output: &std::process::Output) -> String {
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !stdout.is_empty() {
+        return stdout;
+    }
+    String::from_utf8_lossy(&output.stderr).trim().to_string()
+}
+
+fn home_directory() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        env::var_os("USERPROFILE").map(PathBuf::from)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        env::var_os("HOME").map(PathBuf::from)
+    }
+}
+
+fn add_versioned_child_directories(directories: &mut Vec<PathBuf>, root: &Path, suffix: &str) {
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            directories.push(path.join(suffix));
+        }
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn add_cask_engine_directories(directories: &mut Vec<PathBuf>) {
+    for root in [
+        Path::new("/opt/homebrew/Caskroom/mitmproxy"),
+        Path::new("/usr/local/Caskroom/mitmproxy"),
+    ] {
+        let Ok(entries) = fs::read_dir(root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry
+                .path()
+                .join("mitmproxy.app")
+                .join("Contents")
+                .join("MacOS");
+            if path.is_dir() {
+                directories.push(path);
+            }
+        }
+    }
+}
+
+fn deduplicate_paths(paths: &mut Vec<PathBuf>) {
+    let mut unique = Vec::with_capacity(paths.len());
+    for path in paths.drain(..) {
+        if !unique.iter().any(|candidate| candidate == &path) {
+            unique.push(path);
+        }
+    }
+    *paths = unique;
 }
 
 fn bounded_flow_limit(value: u16) -> usize {
@@ -896,5 +1100,16 @@ mod tests {
             assert!(status.success());
         }
         let _ = fs::remove_file(path);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn discovers_homebrew_engine_when_present() {
+        let expected = Path::new("/opt/homebrew/bin/mitmdump");
+        if expected.is_file() {
+            let (engine, version) = probe_engine();
+            assert_eq!(engine.as_deref(), Some("/opt/homebrew/bin/mitmdump"));
+            assert!(version.is_some());
+        }
     }
 }

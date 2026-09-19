@@ -285,7 +285,12 @@ function SettingsDrawer({ settings, onClose, onSave }: { settings: MonitorSettin
       if (!cancelled) setTlsStatus(status);
     }).catch(() => undefined);
     void invoke<TlsInstallationInfo>("get_tls_installation_info").then((info) => {
-      if (!cancelled) setTlsInstallInfo(info);
+      if (!cancelled) {
+        setTlsInstallInfo(info);
+        if (!settings.tls_engine_path && info.engine_path) {
+          setDraft((current) => current.tls_engine_path ? current : { ...current, tls_engine_path: info.engine_path ?? "" });
+        }
+      }
     }).catch(() => undefined);
     return () => { cancelled = true; };
   }, []);
@@ -305,7 +310,11 @@ function SettingsDrawer({ settings, onClose, onSave }: { settings: MonitorSettin
     setTlsInstallBusy(true);
     setTlsInstallError("");
     try {
-      setTlsInstallInfo(await invoke<TlsInstallationInfo>("install_tls_engine"));
+      const info = await invoke<TlsInstallationInfo>("install_tls_engine");
+      setTlsInstallInfo(info);
+      if (info.engine_path) {
+        setDraft((current) => ({ ...current, tls_engine_path: info.engine_path ?? "" }));
+      }
     } catch (error) {
       setTlsInstallError(String(error));
       void invoke<TlsInstallationInfo>("get_tls_installation_info").then(setTlsInstallInfo).catch(() => undefined);
