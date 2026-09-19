@@ -8,6 +8,14 @@
 - 目标：本地构建 macOS 安装包，并由 GitHub Actions 构建 Windows、macOS、Linux 发布附件。
 - 应用监控数据仍保持本地化；本次云端上传仅指 GitHub Release 安装包分发。
 
+## 2026-09-19 | v0.1.2 发布完成
+
+- 提交：`f24ab82`；tag：`v0.1.2`；GitHub Actions run：`35439619694`，macOS、Windows、Linux 全部成功。
+- 本地产物：`src-tauri/target/release/bundle/macos/Sentinel Flow.app`；`src-tauri/target/release/bundle/dmg/Sentinel Flow_0.1.2_aarch64.dmg`。
+- Release：https://github.com/nexusonelw/sentinelFlow/releases/tag/v0.1.2
+- 可下载附件：macOS Universal DMG 与 app tar.gz；Windows x64 EXE/MSI；Linux x86_64 AppImage/DEB/RPM。
+- GitHub Actions 仍报告 Node.js 20 弃用 warning，但不影响构建和发布结果。
+
 ## 2026-09-19 | v0.1.1 发布完成
 
 - 本地构建：`src-tauri/target/release/bundle/macos/Sentinel Flow.app`；手工生成 DMG：`src-tauri/target/release/bundle/dmg/Sentinel Flow_0.1.1_aarch64.dmg`。
