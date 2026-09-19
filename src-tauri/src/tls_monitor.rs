@@ -1,6 +1,5 @@
 use crate::models::{
-    MonitorSettings, TlsFlowEvent, TlsInstallationInfo, TlsMonitorSessionStatus,
-    TlsMonitorStatus,
+    MonitorSettings, TlsFlowEvent, TlsInstallationInfo, TlsMonitorSessionStatus, TlsMonitorStatus,
 };
 use std::{
     collections::BTreeMap,
@@ -194,7 +193,7 @@ impl TlsMonitorManager {
         }
     }
 
-    pub fn status(&mut self, data_dir: &Path, settings: &MonitorSettings) -> TlsMonitorStatus {
+    pub fn status(&mut self, _data_dir: &Path, settings: &MonitorSettings) -> TlsMonitorStatus {
         self.refresh_children();
         let recent_flow_limit = bounded_flow_limit(settings.tls_recent_flow_limit);
         let sessions: Vec<TlsMonitorSessionStatus> = self
@@ -237,16 +236,20 @@ impl TlsMonitorManager {
             } else {
                 format!("local capture · {running_count} 个进程 · 透明出站捕获")
             },
-            engine: primary.and_then(|session| session.engine.clone()).or_else(|| {
-                (!settings.tls_engine_path.is_empty()).then(|| settings.tls_engine_path.clone())
-            }),
+            engine: primary
+                .and_then(|session| session.engine.clone())
+                .or_else(|| {
+                    (!settings.tls_engine_path.is_empty()).then(|| settings.tls_engine_path.clone())
+                }),
             ca_ready: primary.is_some_and(|session| session.ca_ready),
             ca_path: primary.and_then(|session| session.ca_path.clone()),
             flow_log_path: primary.and_then(|session| session.flow_log_path.clone()),
             recent_flows,
             recent_flow_limit,
             engine_log_path: primary.and_then(|session| session.engine_log_path.clone()),
-            last_error: sessions.iter().find_map(|session| session.last_error.clone()),
+            last_error: sessions
+                .iter()
+                .find_map(|session| session.last_error.clone()),
             note: if running_count > 0 {
                 format!(
                     "同时捕获 {running_count} 个用户选择的 PID；不改系统代理、不改默认路由、不创建 TUN，也不会接管 VirtualBox/VPN 保护名单。每个 PID 使用独立引擎和流日志，只记录启动监控后的新流。"

@@ -1,11 +1,15 @@
 {
   "name": "sentinel-flow",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "version:patch": "node scripts/bump-version.mjs patch",
+    "version:minor": "node scripts/bump-version.mjs minor",
+    "version:major": "node scripts/bump-version.mjs major",
+    "package:local": "npm run version:patch && npm run tauri build",
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",

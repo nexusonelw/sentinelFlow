@@ -124,6 +124,17 @@ main { min-width: 0; }
 .scope-filter-bar > div { min-width: 0; display: flex; flex: 1; align-items: center; gap: 12px; }
 .scope-filter-bar > div > span { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; color: #7d857f; font-size: 9px; font-weight: 700; }
 .scope-filter-bar > div > span svg { color: #756ee4; }
+.tls-monitor-toolbar { margin: -7px 0 14px; padding: 14px 16px; }
+.tls-monitor-toolbar-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.tls-monitor-toolbar-head h2 { margin: 0; color: #4a554e; font-size: 11px; }
+.tls-monitor-toolbar-head p { margin: 4px 0 0; color: #8b948d; font-size: 8px; }
+.tls-monitor-toolbar-head button { flex: 0 0 auto; height: 30px; color: #a9584e; border-color: #f0d0cb; background: #fff6f4; }
+.tls-monitor-toolbar-head button:hover:not(:disabled) { color: #923d34; border-color: #e7b5ae; background: #ffefec; }
+.tls-monitor-toolbar-head button:disabled { color: #a2a8a4; background: #f4f6f4; }
+.tls-toolbar-sessions, .tls-session-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.tls-toolbar-sessions span, .tls-session-list span { display: inline-flex; align-items: center; gap: 5px; padding: 5px 7px; border-radius: 7px; color: #287858; background: #e9f7f0; font-size: 7px; }
+.tls-toolbar-sessions i, .tls-session-list i { width: 5px; height: 5px; border-radius: 50%; background: #31a978; box-shadow: 0 0 0 3px rgba(49, 169, 120, .12); }
+.tls-toolbar-note { display: block; margin-top: 9px; color: #8b948d; font-size: 8px; line-height: 1.5; }
 .scope-segments, .mini-segments { min-width: 0; display: flex; padding: 3px; border-radius: 9px; background: #f1f3f1; }
 .scope-segments button, .mini-segments button { min-height: 28px; padding: 0 10px; border: 0; border-radius: 7px; color: #7d857f; background: transparent; font-size: 8px; font-weight: 700; white-space: nowrap; }
 .scope-segments button.active, .mini-segments button.active { color: #514bc0; background: #fff; box-shadow: 0 1px 4px rgba(44, 50, 46, .12); }
@@ -288,6 +299,7 @@ tbody tr.historical-row .process-icon { filter: grayscale(.45); opacity: .78; }
 .tls-monitor-status strong { color: #4d5a51; font-size: 9px; }
 .tls-monitor-status.running strong { color: #287858; }
 .tls-monitor-status span, .tls-monitor-status code, .tls-monitor-status small { color: #818a83; font-size: 7px; line-height: 1.5; overflow-wrap: anywhere; }
+.tls-monitor-status .tls-session-list { margin-top: 3px; }
 .tls-install-card { display: flex; flex-direction: column; gap: 6px; margin-top: 11px; padding: 10px; border: 1px solid #e4e8e4; border-radius: 9px; background: #fbfcfb; }
 .tls-install-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #69736c; }
 .tls-install-head > div { min-width: 0; display: flex; flex-direction: column; gap: 3px; }

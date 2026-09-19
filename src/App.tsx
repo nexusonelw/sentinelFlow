@@ -290,10 +290,10 @@ function SettingsDrawer({ settings, onClose, onSave }: { settings: MonitorSettin
     return () => { cancelled = true; };
   }, []);
 
-  async function stopTlsMonitor() {
+  async function stopAllTlsMonitors() {
     if (!isTauri()) return;
     try {
-      const status = await invoke<TlsMonitorStatus>("stop_tls_monitor");
+      const status = await invoke<TlsMonitorStatus>("stop_all_tls_monitors");
       setTlsStatus(status);
     } catch {
       // The status remains visible; the next open will retry the native query.
@@ -359,7 +359,15 @@ function SettingsDrawer({ settings, onClose, onSave }: { settings: MonitorSettin
               <label className="tls-input-row"><span>保护进程</span><textarea value={draft.tls_excluded_processes.join(", ")} onChange={(event) => setDraft({ ...draft, tls_excluded_processes: event.target.value.split(/[,\n]/).map((value) => value.trim()).filter(Boolean) })} placeholder="VirtualBox, WireGuard, OpenVPN" rows={2} /></label>
             </>}
             {draft.tls_mode === "keylog" && <p className="setting-help">目标应用必须在启动前继承 SSLKEYLOGFILE；此模式不改网络路径，也不会影响 VPN 或 VirtualBox。</p>}
-            {tlsStatus && <div className={`tls-monitor-status ${tlsStatus.running ? "running" : ""}`}><strong>{tlsStatus.running ? `TLS 监控正在运行${tlsStatus.target_pid ? ` · PID ${tlsStatus.target_pid}` : ""}` : "TLS 监控未运行"}</strong><span>{tlsStatus.note}</span>{tlsStatus.ca_path && <code>CA：{tlsStatus.ca_path}{tlsStatus.ca_ready ? "（已生成，尚未自动信任）" : "（等待引擎生成）"}</code>}{tlsStatus.engine_log_path && <code>引擎日志：{tlsStatus.engine_log_path}</code>}{tlsStatus.last_error && <small>{tlsStatus.last_error}</small>}{tlsStatus.running && <button type="button" className="secondary tls-stop-button" onClick={() => void stopTlsMonitor()}>停止当前 MITM 监控</button>}</div>}
+            {tlsStatus && <div className={`tls-monitor-status ${tlsStatus.running ? "running" : ""}`}>
+              <strong>{tlsStatus.running ? `TLS 监控正在运行 · ${tlsStatus.running_count} 个进程` : "TLS 监控未运行"}</strong>
+              <span>{tlsStatus.note}</span>
+              {tlsStatus.sessions.filter((session) => session.running).length > 0 && <div className="tls-session-list">{tlsStatus.sessions.filter((session) => session.running).map((session) => <span key={session.target_pid}><i />{session.process_name || "未知进程"} · PID {session.target_pid}</span>)}</div>}
+              {tlsStatus.ca_path && <code>CA：{tlsStatus.ca_path}{tlsStatus.ca_ready ? "（已生成，尚未自动信任）" : "（等待引擎生成）"}</code>}
+              {tlsStatus.engine_log_path && <code>引擎日志：{tlsStatus.engine_log_path}</code>}
+              {tlsStatus.last_error && <small>{tlsStatus.last_error}</small>}
+              {tlsStatus.running && <button type="button" className="secondary tls-stop-button" onClick={() => void stopAllTlsMonitors()}>一键停止所有 TLS 监控</button>}
+            </div>}
             <div className="tls-install-card">
               <div className="tls-install-head"><div><strong>监控引擎安装</strong><span>{tlsInstallInfo ? `${tlsInstallInfo.platform} · ${tlsInstallInfo.installed ? "已安装" : "未安装"}` : "正在检查本机安装状态…"}</span></div>{tlsInstallInfo?.installed ? <Check size={16} /> : <Terminal size={16} />}</div>
               {tlsInstallInfo && <>
@@ -470,12 +478,13 @@ function ProcessDrawer({ process, nativeMode, connectionScope, onConnectionScope
     if (!nativeMode) return;
     setTlsActionError("");
     try {
-      const command = tlsStatus?.running && tlsStatus.target_pid === process.pid
-        ? "stop_tls_monitor"
+      const currentSession = tlsStatus?.sessions.find((session) => session.target_pid === process.pid);
+      const command = currentSession?.running
+        ? "stop_tls_process_monitor"
         : "start_tls_monitor";
       const status = command === "start_tls_monitor"
         ? await invoke<TlsMonitorStatus>(command, { pid: process.pid, processName: process.name, executable: process.executable })
-        : await invoke<TlsMonitorStatus>(command);
+        : await invoke<TlsMonitorStatus>(command, { pid: process.pid });
       setTlsStatus(status);
     } catch (error) {
       setTlsActionError(String(error));
@@ -488,6 +497,9 @@ function ProcessDrawer({ process, nativeMode, connectionScope, onConnectionScope
   const fileEvidence = detail?.open_files ?? [];
   const allConnections = detail?.connections.length ? detail.connections : process.connection_history;
   const visibleConnections = connectionScope === "active" ? allConnections.filter((connection) => connection.is_alive) : allConnections;
+  const currentTlsSession = tlsStatus?.sessions.find((session) => session.target_pid === process.pid);
+  const processTlsRunning = currentTlsSession?.running === true;
+  const processTlsFlows = currentTlsSession?.recent_flows ?? tlsStatus?.recent_flows.filter((flow) => flow.target_pid === process.pid) ?? [];
 
   return (
     <div className="drawer-layer" onMouseDown={onClose}>
@@ -528,11 +540,11 @@ function ProcessDrawer({ process, nativeMode, connectionScope, onConnectionScope
           {detail?.tls_inspection && <section className="setting-section detail-section">
             <h3><ShieldCheck size={15} /> TLS 内容可见性</h3>
             <div className={`tls-status ${detail.tls_inspection.plaintext_available ? "available" : ""}`}><strong>{detail.tls_inspection.state}</strong><span>{detail.tls_inspection.method}</span><p>{detail.tls_inspection.note}</p>{detail.tls_inspection.keylog_path && <code>{detail.tls_inspection.keylog_path}</code>}</div>
-            {nativeMode && <div className="tls-monitor-actions"><button className="secondary" disabled={!process.is_running || tlsStatus?.mode !== "local_proxy" || (!!tlsStatus?.running && tlsStatus.target_pid !== process.pid)} onClick={() => void toggleTlsMonitor()}>{tlsStatus?.running && tlsStatus.target_pid === process.pid ? "停止此进程 TLS 监控" : "启动此进程 TLS 监控"}</button><span>{tlsStatus?.mode !== "local_proxy" ? "请先在设置中保存“单应用本地解密代理”模式" : tlsStatus?.running && tlsStatus.target_pid !== process.pid ? `另一个进程正在监控：PID ${tlsStatus.target_pid}` : "单应用捕获不会修改系统代理、路由或虚拟网卡"}</span></div>}
+            {nativeMode && <div className="tls-monitor-actions"><button className="secondary" disabled={!process.is_running || tlsStatus?.mode !== "local_proxy"} onClick={() => void toggleTlsMonitor()}>{processTlsRunning ? "停止此进程 TLS 监控" : "启动此进程 TLS 监控"}</button><span>{tlsStatus?.mode !== "local_proxy" ? "请先在设置中保存“单应用本地解密代理”模式" : processTlsRunning ? "此进程正在监控；关闭详情页不会停止" : "可同时监控多个进程；单应用捕获不会修改系统代理、路由或虚拟网卡"}</span></div>}
             {tlsActionError && <p className="tls-action-error">{tlsActionError}</p>}
-            {tlsStatus?.target_pid === process.pid && <div className="tls-flow-list">
-              <div className="tls-flow-head"><strong>最近流记录 · {tlsStatus.recent_flows.length} / {tlsStatus.recent_flow_limit}</strong><span>{tlsStatus.running ? "只记录监控启动后产生的新请求；当前上传速率和累计上传见上方" : "监控已停止，以下保留本次 PID 的历史流记录"}</span></div>
-              {tlsStatus.recent_flows.length ? tlsStatus.recent_flows.map((flow, index) => <div className="tls-flow-row" key={`${flow.timestamp}-${flow.direction}-${index}`}>
+            {currentTlsSession && <div className="tls-flow-list">
+              <div className="tls-flow-head"><strong>最近流记录 · {processTlsFlows.length} / {tlsStatus?.recent_flow_limit ?? 0}</strong><span>{processTlsRunning ? "只记录监控启动后产生的新请求；当前上传速率和累计上传见上方" : "监控已停止，以下保留本次 PID 的历史流记录"}</span></div>
+              {processTlsFlows.length ? processTlsFlows.map((flow, index) => <div className="tls-flow-row" key={`${flow.timestamp}-${flow.direction}-${index}`}>
                 <span>{flow.protocol.toUpperCase()} · {flow.direction === "request" ? "请求/上传" : "响应/下载"} · {flow.method || (flow.status ? `HTTP ${flow.status}` : "TLS 数据")}</span>
                 <strong>{flow.host || "未知端点"}</strong>
                 <small>{flow.url || "非 HTTP 流"}{flow.status ? ` · HTTP ${flow.status}` : ""} · {formatBytes(flow.body_bytes)} · {new Date(flow.timestamp * 1000).toLocaleTimeString()}</small>
@@ -566,9 +578,21 @@ function CoveragePage({ snapshot }: { snapshot: MonitorSnapshot }) {
   return <div className="page-section"><div className="section-heading"><span>系统覆盖</span><h1>采集能力与权限</h1><p>只显示真实生效的能力，不用模拟数据掩盖缺失的系统权限。</p></div><div className="coverage-grid">{rows.map(({ key, icon: Icon, title, detail }) => { const status = snapshot.coverage[key]; return <article key={key}><div className={`coverage-icon ${status}`}><Icon size={21} /></div><div><span>{title}</span><strong>{detail}</strong><small>{status === "active" ? "已启用" : status === "limited" ? "受限模式" : "需要系统权限"}</small></div></article>; })}</div><section className="panel coverage-note"><div><Shield size={20} /></div><div><h2>{snapshot.coverage.collector}</h2><p>{snapshot.coverage.note}</p></div></section></div>;
 }
 
-function AllProcessesPage({ snapshot, connectionScope, onConnectionScopeChange, onOpen, onCopy, onToggleNetwork, copyingProcessId, networkActionId }: { snapshot: MonitorSnapshot; connectionScope: ConnectionScope; onConnectionScopeChange: (scope: ConnectionScope) => void; onOpen: (p: ProcessFlow) => void; onCopy: (p: ProcessFlow) => void; onToggleNetwork: (p: ProcessFlow) => void; copyingProcessId: string | null; networkActionId: string | null }) {
+function TlsMonitorToolbar({ status, onStopAll }: { status: TlsMonitorStatus | null; onStopAll: () => void }) {
+  const runningSessions = status?.sessions.filter((session) => session.running) ?? [];
+  return <section className="panel tls-monitor-toolbar">
+    <div className="tls-monitor-toolbar-head">
+      <div><h2>TLS 监控列表</h2><p>{runningSessions.length ? `正在监控 ${runningSessions.length} 个进程；每个进程使用独立的 Local Capture 会话` : "尚未启动进程级 TLS 监控"}</p></div>
+      <button type="button" className="secondary" disabled={!runningSessions.length} onClick={onStopAll}>一键停止所有 TLS 监控</button>
+    </div>
+    {runningSessions.length ? <div className="tls-toolbar-sessions">{runningSessions.map((session) => <span key={session.target_pid}><i />{session.process_name || "未知进程"} · PID {session.target_pid}</span>)}</div> : <span className="tls-toolbar-note">请在进程详情中启动。关闭详情页不会停止会话；只有单独停止或点击上方按钮才会停止。</span>}
+  </section>;
+}
+
+function AllProcessesPage({ snapshot, tlsStatus, onStopAllTlsMonitors, connectionScope, onConnectionScopeChange, onOpen, onCopy, onToggleNetwork, copyingProcessId, networkActionId }: { snapshot: MonitorSnapshot; tlsStatus: TlsMonitorStatus | null; onStopAllTlsMonitors: () => void; connectionScope: ConnectionScope; onConnectionScopeChange: (scope: ConnectionScope) => void; onOpen: (p: ProcessFlow) => void; onCopy: (p: ProcessFlow) => void; onToggleNetwork: (p: ProcessFlow) => void; copyingProcessId: string | null; networkActionId: string | null }) {
   return <div className="page-section">
     <div className="section-heading"><span>进程观察器</span><h1>历史进程与连接</h1><p>同一个 PID 的不同生命周期按启动时间拆分。历史进程包含当前运行中的进程，短暂出现后停止的连接也会继续保留。</p></div>
+    <TlsMonitorToolbar status={tlsStatus} onStopAll={onStopAllTlsMonitors} />
     <div className="scope-filter-bar">
       <div><span><Network size={14} />连接信息</span><div className="scope-segments"><button className={connectionScope === "active" ? "active" : ""} onClick={() => onConnectionScopeChange("active")}>仅当前活跃</button><button className={connectionScope === "history" ? "active" : ""} onClick={() => onConnectionScopeChange("history")}>历史连接（含当前）</button></div></div>
     </div>
@@ -587,6 +611,7 @@ export default function App() {
   const [networkActionId, setNetworkActionId] = useState<string | null>(null);
   const [networkPrompt, setNetworkPrompt] = useState<ProcessFlow | null>(null);
   const [connectionScope, setConnectionScope] = useState<ConnectionScope>("active");
+  const [tlsStatus, setTlsStatus] = useState<TlsMonitorStatus | null>(null);
   const [copyNotice, setCopyNotice] = useState<{ tone: "success" | "error"; message: string } | null>(null);
   const notifiedEvents = useRef(new Set<string>());
   const notificationSeeded = useRef(false);
@@ -631,6 +656,22 @@ export default function App() {
   }, [nativeMode, snapshot.events, snapshot.settings.desktop_notifications]);
 
   useEffect(() => {
+    if (!nativeMode) return;
+    let cancelled = false;
+    async function refreshTlsStatus() {
+      try {
+        const status = await invoke<TlsMonitorStatus>("get_tls_monitor_status");
+        if (!cancelled) setTlsStatus(status);
+      } catch {
+        // The browser preview does not expose native TLS monitor commands.
+      }
+    }
+    void refreshTlsStatus();
+    const timer = window.setInterval(refreshTlsStatus, 2500);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [nativeMode]);
+
+  useEffect(() => {
     if (!copyNotice) return;
     const timer = window.setTimeout(() => setCopyNotice(null), 3600);
     return () => window.clearTimeout(timer);
@@ -660,6 +701,17 @@ export default function App() {
       setSnapshot(data);
     } else setSnapshot((current) => ({ ...current, settings }));
     setSettingsOpen(false);
+  }
+
+  async function stopAllTlsMonitors() {
+    if (!isTauri()) return;
+    try {
+      const status = await invoke<TlsMonitorStatus>("stop_all_tls_monitors");
+      setTlsStatus(status);
+      setCopyNotice({ tone: "success", message: "已停止全部 TLS 监控；流量历史仍会保留。" });
+    } catch (error) {
+      setCopyNotice({ tone: "error", message: `停止 TLS 监控失败：${String(error)}` });
+    }
   }
 
   async function copyProcessForAi(process: ProcessFlow) {
@@ -753,6 +805,7 @@ export default function App() {
           thresholdMbPerMinute={snapshot.settings.threshold_mb_per_minute}
         />
       </Suspense>
+      <TlsMonitorToolbar status={tlsStatus} onStopAll={() => void stopAllTlsMonitors()} />
       <div className="lower-grid"><ProcessTable processes={sortedProcesses} maxRows={8} onOpen={setSelectedProcess} onCopy={copyProcessForAi} onToggleNetwork={requestNetworkToggle} copyingProcessId={copyingProcessId} networkActionId={networkActionId} /><section className="panel events-panel"><div className="panel-head"><div><h2>最近事件</h2><p>需要关注的行为变化</p></div><button className="text-button" onClick={() => setActivePage("events")}>查看全部</button></div><div className="event-list">{snapshot.events.slice(0, 4).map((event) => <EventItem key={event.id} event={event} />)}{!snapshot.events.length && <div className="all-clear"><ShieldCheck size={26} /><strong>暂未发现风险</strong><span>监控将继续在本机运行</span></div>}</div></section></div>
     </>
   );
@@ -765,7 +818,7 @@ export default function App() {
         <header className="topbar"><button className="mobile-menu" onClick={() => setMobileNav(true)}><Menu size={20} /></button><div className="breadcrumbs"><span>Sentinel Flow</span><ChevronRight size={13} /><strong>{activePage === "overview" ? "总览" : activePage === "processes" ? "进程" : activePage === "coverage" ? "系统覆盖" : activePage === "events" ? "风险事件" : "监控规则"}</strong></div><div className="top-actions"><button className="icon-button" aria-label="通知"><Bell size={18} />{snapshot.events.some((event) => !event.acknowledged) && <i />}</button><button className="icon-button" onClick={() => setSettingsOpen(true)} aria-label="设置"><Settings size={18} /></button><button className={`monitor-button ${snapshot.monitoring ? "active" : ""}`} onClick={toggleMonitoring}>{snapshot.monitoring ? <Pause size={15} /> : <Play size={15} />}{snapshot.monitoring ? "暂停监控" : "开始监控"}</button></div></header>
         <div className="content">
           {activePage === "overview" && overview}
-          {(activePage === "processes" || activePage === "flows") && <AllProcessesPage snapshot={snapshot} connectionScope={connectionScope} onConnectionScopeChange={setConnectionScope} onOpen={setSelectedProcess} onCopy={copyProcessForAi} onToggleNetwork={requestNetworkToggle} copyingProcessId={copyingProcessId} networkActionId={networkActionId} />}
+          {(activePage === "processes" || activePage === "flows") && <AllProcessesPage snapshot={snapshot} tlsStatus={tlsStatus} onStopAllTlsMonitors={() => void stopAllTlsMonitors()} connectionScope={connectionScope} onConnectionScopeChange={setConnectionScope} onOpen={setSelectedProcess} onCopy={copyProcessForAi} onToggleNetwork={requestNetworkToggle} copyingProcessId={copyingProcessId} networkActionId={networkActionId} />}
           {activePage === "coverage" && <CoveragePage snapshot={snapshot} />}
           {activePage === "events" && <div className="page-section"><div className="section-heading"><span>本地风险时间线</span><h1>风险事件</h1><p>由实时阈值、Agent 识别和连接行为共同生成。</p></div><section className="panel all-events"><div className="event-list">{snapshot.events.map((event) => <EventItem key={event.id} event={event} />)}{!snapshot.events.length && <div className="all-clear"><ShieldCheck size={30} /><strong>没有风险事件</strong><span>当前所有进程均低于设置的阈值</span></div>}</div></section></div>}
           {activePage === "rules" && <div className="page-section"><div className="section-heading"><span>个性化策略</span><h1>监控规则</h1><p>阈值规则默认只提醒；进程封禁仅在你手动确认后生效。</p></div><section className="panel rules-hero"><div className="rule-icon"><Sparkles size={25} /></div><div><span>当前规则</span><h2>单进程超过 {snapshot.settings.threshold_mb_per_minute} MB / 分钟时提醒</h2><p>覆盖所有应用，重点标记 AI Agent 及其子进程。代理与 VPN 流量不会被重复统计。</p></div><button className="primary" onClick={() => setSettingsOpen(true)}>编辑规则</button></section></div>}

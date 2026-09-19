@@ -1,6 +1,6 @@
 [package]
 name = "sentinel-flow"
-version = "0.1.0"
+version = "0.1.1"
 description = "Local-first process and network flow monitor"
 authors = ["Sentinel Flow"]
 edition = "2021"
