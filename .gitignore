@@ -1,0 +1,35 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# build output
+dist/
+build/
+src-tauri/target/
+*.tsbuildinfo
+
+# local runtime / session artifacts
+.pi-glla/
+coverage/
+*.log
+
+# env & secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# local databases / capture dumps
+*.db
+*.sqlite
+*.sqlite3
+*.pcap
+*.pcapng
+
+# os / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

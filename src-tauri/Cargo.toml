@@ -1,0 +1,27 @@
+[package]
+name = "sentinel-flow"
+version = "0.1.0"
+description = "Local-first process and network flow monitor"
+authors = ["Sentinel Flow"]
+edition = "2021"
+
+[lib]
+name = "sentinel_flow_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-notification = "2"
+# Keep desktop notifications compatible with the project's Rust 1.88 toolchain.
+notify-rust = "=4.11.7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sysinfo = "0.33"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
+sha2 = "0.10"
+base64 = "0.22"
