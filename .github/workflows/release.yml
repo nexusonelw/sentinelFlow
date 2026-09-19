@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "要构建并发布的版本 tag，例如 v0.1.1"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -26,6 +32,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref_name }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -51,17 +59,18 @@ jobs:
         shell: bash
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          test "v${VERSION}" = "${GITHUB_REF_NAME}"
+          RELEASE_TAG="${{ inputs.release_tag || github.ref_name }}"
+          test "v${VERSION}" = "${RELEASE_TAG}"
 
       - name: Build and upload release assets
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: Sentinel Flow ${{ github.ref_name }}
+          tagName: ${{ inputs.release_tag || github.ref_name }}
+          releaseName: Sentinel Flow ${{ inputs.release_tag || github.ref_name }}
           releaseBody: |
-            Sentinel Flow ${{ github.ref_name }} desktop installers.
+            Sentinel Flow ${{ inputs.release_tag || github.ref_name }} desktop installers.
 
             - macOS: DMG (universal Apple Silicon + Intel)
             - Windows: MSI / NSIS installer
